@@ -21,14 +21,29 @@
 #            docker images day12-agent:prod     # xem dung lượng
 # ═══════════════════════════════════════════════════════════════════
 
-FROM python:3.11
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
-COPY . .
+COPY requirements.txt .
+RUN pip install --user --no-cache-dir -r requirements.txt
 
-RUN pip install -r requirements.txt
+FROM python:3.11-slim AS runtime
 
-EXPOSE 8000
+WORKDIR /app
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+RUN useradd -m appuser
+COPY --from=builder /root/.local /home/appuser/.local
+ENV PATH=/home/appuser/.local/bin:$PATH
+
+COPY --chown=appuser:appuser . .
+
+USER appuser
+
+ENV PORT=8000
+EXPOSE ${PORT}
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD python -c "import urllib.request, os; urllib.request.urlopen('http://localhost:' + os.environ.get('PORT', '8000') + '/health')" || exit 1
+
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]
